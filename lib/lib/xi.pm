@@ -3,19 +3,32 @@ use 5.008_001;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 use File::Spec ();
 use Config ();
 
 our $VERBOSE;
 
-# modules which dosn't exist in CPAN
-our %IGNORE = map { $_ => 1 } (
-    'Encode/ConfigLocal.pm',
-    'Devel/StackTraceFrame.pm',
-    'Log/Agent.pm', # used in Storable.pm
-);
+our @command_intro;
+our %IGNORE;
+
+BEGIN {
+  if (exists $::{'ActivePerl::'}) {
+    # Getting called for ActiveState Perl: use ppm
+    @command_intro = ('ppm', 'install');
+  } else {
+    # use cpanm
+    @command_intro = ('cpanm');
+
+    # modules that don't exist in CPAN
+    %IGNORE = map { $_ => 1 } (
+                               'Encode/ConfigLocal.pm',
+                               'Devel/StackTraceFrame.pm',
+                               'Log/Agent.pm', # used in Storable.pm
+                              );
+  }
+}
 
 sub new {
     my($class, %args) = @_;
@@ -37,9 +50,9 @@ sub run_perl {
     system($^X, (map { "-I$_" } @non_std_inc), @args);
 }
 
-sub cpanm_command {
+sub retrieval_command {
     my($self) = @_;
-    return('cpanm', @{ $self->{cpanm_opts} });
+    return (@command_intro, @{ $self->{retrieval_opts} });
 }
 
 # must be fully-qualified; othewise implied main::INC.
@@ -52,7 +65,7 @@ sub lib::xi::INC {
     $module =~ s/\.pm \z//xms;
     $module =~ s{/}{::}xmsg;
 
-    my @cmd = ($self->cpanm_command, $module);
+    my @cmd = ($self->retrieval_command, $module);
     if($VERBOSE) {
         print STDERR "# PERL_CPANM_OPT: ", ($ENV{PERL_CPANM_OPT} || '') ,"\n";
         print STDERR "# COMMAND: @cmd\n";
@@ -71,18 +84,18 @@ sub lib::xi::INC {
 }
 
 sub import {
-    my($class, @cpanm_opts) = @_;
+    my($class, @retrieval_opts) = @_;
 
     my $install_dir;
 
-    if(@cpanm_opts && $cpanm_opts[0] !~ /^-/) {
+    if(@retrieval_opts && $retrieval_opts[0] !~ /^-/) {
         require File::Spec;
         my $base;
         if($0 ne '-e' && -e $0) {
             my($volume, $dir, undef) = File::Spec->splitpath($0);
             $base = File::Spec->catpath($volume, $dir, '');
         }
-        $install_dir = File::Spec->rel2abs(shift(@cpanm_opts), $base);
+        $install_dir = File::Spec->rel2abs(shift(@retrieval_opts), $base);
     }
 
     my @myinc;
@@ -94,15 +107,15 @@ sub import {
         );
         unshift @INC, @myinc;
 
-        unshift @cpanm_opts, '-l', $install_dir;
+        unshift @retrieval_opts, '-l', $install_dir;
     }
 
-    $VERBOSE = scalar grep { $_ eq '-v' } @cpanm_opts;
+    $VERBOSE = scalar grep { $_ eq '-v' } @retrieval_opts;
 
     push @INC, $class->new(
         install_dir => $install_dir,
         myinc       => $install_dir ? \@myinc : \@INC,
-        cpanm_opts  => \@cpanm_opts,
+        retrieval_opts  => \@retrieval_opts,
     );
     return;
 }
@@ -118,23 +131,25 @@ lib::xi - Installs missing modules on demand
 
 =head1 VERSION
 
-This document describes lib::xi version 1.03.
+This document describes lib::xi version 1.04.
 
 =head1 SYNOPSIS
 
-    # to install missing libaries automatically
+    # to install missing libaries automatically;
+    # uses ppm if running on ActiveState Perl, and cpanm otherwise.
     $ perl -Mlib::xi script.pl
 
-    # with cpanm options
-    $ perl -Mlib::xi=-q script.pl
+    # with retrieval options
+    $ perl -Mlib::xi=option1,option2 script.pl
 
     # to install missing libaries to extlib/ (with cpanm -l extlib)
+    # if using cpanm
     $ perl -Mlib::xi=extlib script.pl
 
-    # with cpanm options
+    # with cpanm options, if using cpanm
     $ perl -Mlib::xi=extlib,-q script.pl
 
-    # with cpanm options via env
+    # with retrieval options via env
     $ PERL_CPANM_OPT='-l extlib -q' perl -Mlib::xi script.pl
 
 =head1 DESCRIPTION
@@ -147,8 +162,9 @@ Laziness. Stop doing it, making computers do it!
 C<lib::xi> is a pragma to install missing libraries automatically if and only
 if they are required.
 
-The mechanism, using C<< @INC hook >>, is that when the perl interpreter cannot
-find a library required, this pragma try to install it with C<cpanm(1)> and
+The mechanism, using C<< @INC hook >>, is that when the perl
+interpreter cannot find a library required, this pragma try to install
+it with C<ppm> (if running on ActiveState Perl) or C<cpanm(1)> and
 tell it to the interpreter.
 
 =head1 INTERFACE
@@ -175,7 +191,7 @@ the I<$install_dir> if it's not needed.
 There are similar modules to C<lib::xi>, namely C<CPAN::AutoINC> and
 C<Module::AutoINC>, which use C<CPAN.pm> to install modules; the difference
 is that C<lib::xi> supports C<local::lib> (via C<cpanm -l>) and has little
-overhead.
+overhead, and supports ppm for ActiveState Perl.
 
 =head1 DEPENDENCIES
 
@@ -200,6 +216,7 @@ L<Module::AutoINC>
 =head1 AUTHOR
 
 Fuji, Goro (gfx) E<lt>gfuji@cpan.orgE<gt>
+ActiveState ppm support added by Louis Strous
 
 =head1 LICENSE AND COPYRIGHT
 
